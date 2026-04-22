@@ -1,0 +1,11 @@
+alter table public.projects disable row level security;
+alter table public.boq_items disable row level security;
+alter table public.subcontractors disable row level security;
+alter table public.subcontract_breakdown disable row level security;
+alter table public.qs_entries disable row level security;
+alter table public.qs_approvals disable row level security;
+alter table public.certificates disable row level security;
+alter table public.certificate_lines disable row level security;
+alter table public.technical_records disable row level security;
+alter table public.procurement_records disable row level security;
+alter table public.variations disable row level security;
