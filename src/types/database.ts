@@ -16,6 +16,25 @@ export interface Project { id:string; project_code:string; project_name:string; 
 export interface User { id:string; email:string; full_name:string; role:UserRole; is_active:boolean; avatar_url:string|null; created_at:string; updated_at:string }
 export interface ProjectUser { id:string; project_id:string; user_id:string; role:UserRole; assigned_at:string }
 export interface ProjectStructure { id:string; project_id:string; parent_id:string|null; structure_code:string; structure_name:string; structure_type:'Phase'|'Building'|'Villa'; level_no:number; sort_order:number; is_active:boolean; created_at:string; updated_at:string }
+
+export type NodeType = 'project' | 'phase' | 'zone' | 'cluster' | 'building' | 'tower' | 'block' | 'villa' | 'mall' | 'section' | 'floor' | 'unit' | 'wing' | 'basement' | 'podium' | 'part' | 'custom'
+
+export interface StructureNode {
+  id: string
+  project_id: string
+  parent_id: string | null
+  code: string
+  name: string
+  type: NodeType
+  level: number
+  sort_order: number
+  description: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+export type StructureNodeInsert = Omit<StructureNode, 'id' | 'created_at' | 'updated_at'>
+export type StructureNodeUpdate = Partial<StructureNodeInsert>
 export interface Subcontractor { id:string; subcontractor_code:string; name:string; contact_person:string|null; phone:string|null; email:string|null; address:string|null; tax_registration_no:string|null; commercial_reg_no:string|null; default_retention_pct:number; advance_amount:number|null; advance_recovery_pct:number|null; status:SubcontractorStatus; notes:string|null; created_at:string; updated_at:string }
 export interface BoqItem { id:string; project_id:string; structure_id:string|null; item_code:string; description:string; unit:string; boq_qty:number; client_rate:number|null; client_budget:number|null; chapter:string|null; discipline:Discipline|null; csi_ref:string|null; wbs_code:string|null; source_note:string|null; is_provisional:boolean; created_at:string; updated_at:string }
 export interface SubcontractBreakdown { id:string; project_id:string; subcontractor_id:string; boq_item_id:string; structure_id:string|null; assignment_key:string; project_model:string|null; subcontract_qty:number; rate:number; contract_value:number|null; client_rate:number|null; notes:string|null; is_active:boolean; created_at:string; updated_at:string }
@@ -64,6 +83,7 @@ export interface Database {
       variations:            { Row:Variation;            Insert:VariationInsert;            Update:Partial<VariationInsert> }
       project_users:         { Row:ProjectUser;          Insert:Omit<ProjectUser,'id'|'assigned_at'>; Update:Partial<ProjectUser> }
       project_structures:     { Row:ProjectStructure;     Insert:Omit<ProjectStructure,'id'|'created_at'|'updated_at'>; Update:Partial<ProjectStructure> }
+      project_structure_nodes:{ Row:StructureNode;         Insert:StructureNodeInsert; Update:StructureNodeUpdate }
     }
     Views: {
       v_dashboard_kpis:      { Row:VDashboardKpis }

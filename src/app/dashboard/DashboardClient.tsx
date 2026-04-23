@@ -83,11 +83,19 @@ import {
   useDeleteVariation,
   useDeleteProject,
   useDeleteQsEntry,
+  useStructureNodes,
+  useCreateStructureNode,
+  useUpdateStructureNode,
+  useDeleteStructureNode,
+  useBulkCreateStructureNodes,
+  useReorderStructureNode,
 } from '@/hooks/queries'
 import type {
   ActivityStatus,
   ApprovalStatus,
+  NodeType,
   PenaltyType,
+  StructureNode,
   TradeType,
   BoqItem,
   CertificateStatus,
@@ -217,6 +225,25 @@ export default function DashboardPage() {
   const [invoiceForm, setInvoiceForm] = useState({ id: '', invoice_no: '', invoice_date: today(), client_name: activeProject?.client ?? '', description: '', amount: '0', status: 'Draft' as ClientInvoice['status'], notes: '' })
   const [clientInvoices, setClientInvoices] = useState<ClientInvoice[]>([])
   const [structureForm, setStructureForm] = useState({ code: '', name: '', type: 'Phase' as ProjectStructure['type'], parent_id: '' })
+  // New tree-based structure
+  const { data: structureNodes = [] } = useStructureNodes(projectId)
+  const createStructureNode = useCreateStructureNode()
+  const updateStructureNode = useUpdateStructureNode()
+  const deleteStructureNode = useDeleteStructureNode()
+  const bulkCreateStructureNodes = useBulkCreateStructureNodes()
+  const reorderStructureNode = useReorderStructureNode()
+  const NODE_TYPES: NodeType[] = ['project','phase','zone','cluster','building','tower','block','villa','mall','section','floor','unit','wing','basement','podium','part','custom']
+  const NODE_COLORS: Record<string, string> = { project:'#1a1a2e', phase:'#1565c0', zone:'#6a1b9a', cluster:'#00695c', building:'#1a6b4a', tower:'#2e7d32', block:'#33691e', villa:'#e65100', mall:'#b71c1c', section:'#4e342e', floor:'#37474f', unit:'#546e7a', wing:'#00838f', basement:'#4527a0', podium:'#ad1457', part:'#558b2f', custom:'#888' }
+  const [nodeView, setNodeView] = useState<'tree'|'table'>('tree')
+  const [nodeForm, setNodeForm] = useState<{ parent_id: string; code: string; name: string; type: NodeType; description: string }>({ parent_id: '', code: '', name: '', type: 'building', description: '' })
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
+  const [editNodeForm, setEditNodeForm] = useState<any>({})
+  const [nodeSearch, setNodeSearch] = useState('')
+  const [nodeTypeFilter, setNodeTypeFilter] = useState('')
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
+  const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
   const [structures, setStructures] = useState<ProjectStructure[]>([])
   const [selectedStructureId, setSelectedStructureId] = useState('')
   const [selectedSubcontractorId, setSelectedSubcontractorId] = useState<string>('')
@@ -1111,100 +1138,455 @@ export default function DashboardPage() {
           )}
 
 
-          {activeView === 'structure' && (
-            <>
-              <Card title="Add project structure row">
-                {!projectId ? <div>Select a project first.</div> : <>
-                  {boqStructures.length === 0 && <div style={{ marginBottom: 12, color: '#8a5a00' }}>Create at least one Building or Villa in Project Structure first.</div>}
-                  <FormGrid>
-                    <Field label="Type"><Select value={structureForm.type} onChange={(e) => setStructureForm({ ...structureForm, type: e.target.value as ProjectStructure['type'], parent_id: '' })}><option>Phase</option><option>Building</option><option>Villa</option></Select></Field>
-                    <Field label="Code"><Input value={structureForm.code} onChange={(e) => setStructureForm({ ...structureForm, code: e.target.value })} /></Field>
-                    <Field label="Name"><Input value={structureForm.name} onChange={(e) => setStructureForm({ ...structureForm, name: e.target.value })} /></Field>
-                    <Field label="Parent"><Select value={structureForm.parent_id} onChange={(e) => setStructureForm({ ...structureForm, parent_id: e.target.value })}>
-                      <option value="">No parent</option>
-                      {structures.filter((s) => structureForm.type === 'Phase' ? false : structureForm.type === 'Building' ? s.type === 'Phase' : s.type === 'Building').map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
-                    </Select></Field>
-                  </FormGrid>
-                  <Toolbar><Button onClick={addStructure} disabled={!projectId || !structureForm.code || !structureForm.name}>Add Structure Row</Button></Toolbar>
-                </>}
-              </Card>
-              <Card title="Structure register" action={<Badge text={`${phaseCount} phases · ${buildingCount} buildings · ${villaCount} villas`} tone="default" />}>
-                <Table
-                  heads={['Type', 'Code', 'Name', 'Parent', 'Action']}
-                  rows={structures.map((s) => {
-                    const parent = structures.find((p) => p.id === s.parent_id)
-                    return [
-                      s.type,
-                      s.code,
-                      s.name,
-                      parent ? `${parent.code} · ${parent.name}` : '—',
-                      <Button key={s.id} tone="danger" onClick={() => removeStructure(s.id)}>Delete</Button>,
-                    ]
-                  })}
-                />
-              </Card>
-            </>
-          )}
+          {activeView === 'structure' && (() => {
+            if (!projectId) return <Card title="Project Structure"><div>Select a project first.</div></Card>
 
-          {activeView === 'subcontractors' && (
-            <>
-              <Card title="Add subcontractor">
-                <FormGrid>
-                  <Field label="Code"><Input value={subForm.subcontractor_code} onChange={(e) => setSubForm({ ...subForm, subcontractor_code: e.target.value })} /></Field>
-                  <Field label="Name"><Input value={subForm.name} onChange={(e) => setSubForm({ ...subForm, name: e.target.value })} /></Field>
-                  <Field label="Contact"><Input value={subForm.contact_person} onChange={(e) => setSubForm({ ...subForm, contact_person: e.target.value })} /></Field>
-                  <Field label="Phone"><Input value={subForm.phone} onChange={(e) => setSubForm({ ...subForm, phone: e.target.value })} /></Field>
-                  <Field label="Email"><Input value={subForm.email} onChange={(e) => setSubForm({ ...subForm, email: e.target.value })} /></Field>
-                </FormGrid>
-                <Toolbar><Button onClick={addSubcontractor} disabled={createSubcontractor.isPending || !subForm.subcontractor_code || !subForm.name}>Add Subcontractor</Button></Toolbar>
+            const TEMPLATES: Record<string, any[]> = {
+  "Single Building": [
+    {
+      "code": "B1",
+      "name": "Building 1",
+      "type": "building",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    }
+  ],
+  "Building + Sections": [
+    {
+      "code": "B1",
+      "name": "Building 1",
+      "type": "building",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    },
+    {
+      "code": "S1",
+      "name": "Section 1",
+      "type": "section",
+      "parent_code": "B1",
+      "level": 1,
+      "sort_order": 0
+    },
+    {
+      "code": "S2",
+      "name": "Section 2",
+      "type": "section",
+      "parent_code": "B1",
+      "level": 1,
+      "sort_order": 1
+    }
+  ],
+  "Villas Compound": [
+    {
+      "code": "PH1",
+      "name": "Phase 1",
+      "type": "phase",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    },
+    {
+      "code": "CL1",
+      "name": "Cluster 1",
+      "type": "cluster",
+      "parent_code": "PH1",
+      "level": 1,
+      "sort_order": 0
+    },
+    {
+      "code": "V1",
+      "name": "Villa Type 1",
+      "type": "villa",
+      "parent_code": "CL1",
+      "level": 2,
+      "sort_order": 0
+    },
+    {
+      "code": "V2",
+      "name": "Villa Type 2",
+      "type": "villa",
+      "parent_code": "CL1",
+      "level": 2,
+      "sort_order": 1
+    }
+  ],
+  "Towers Compound": [
+    {
+      "code": "PH1",
+      "name": "Phase 1",
+      "type": "phase",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    },
+    {
+      "code": "T1",
+      "name": "Tower 1",
+      "type": "tower",
+      "parent_code": "PH1",
+      "level": 1,
+      "sort_order": 0
+    },
+    {
+      "code": "T2",
+      "name": "Tower 2",
+      "type": "tower",
+      "parent_code": "PH1",
+      "level": 1,
+      "sort_order": 1
+    }
+  ],
+  "Residential Compound": [
+    {
+      "code": "PH1",
+      "name": "Phase 1",
+      "type": "phase",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    },
+    {
+      "code": "ZR",
+      "name": "Residential Zone",
+      "type": "zone",
+      "parent_code": "PH1",
+      "level": 1,
+      "sort_order": 0
+    },
+    {
+      "code": "B1",
+      "name": "Building 1",
+      "type": "building",
+      "parent_code": "ZR",
+      "level": 2,
+      "sort_order": 0
+    },
+    {
+      "code": "CL1",
+      "name": "Villa Cluster",
+      "type": "cluster",
+      "parent_code": "ZR",
+      "level": 2,
+      "sort_order": 1
+    },
+    {
+      "code": "V1",
+      "name": "Villa Type A",
+      "type": "villa",
+      "parent_code": "CL1",
+      "level": 3,
+      "sort_order": 0
+    }
+  ],
+  "Mixed Use": [
+    {
+      "code": "POD",
+      "name": "Podium",
+      "type": "podium",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    },
+    {
+      "code": "BAS",
+      "name": "Basement",
+      "type": "basement",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 1
+    },
+    {
+      "code": "MALL",
+      "name": "Mall",
+      "type": "mall",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 2
+    },
+    {
+      "code": "T1",
+      "name": "Residential Tower",
+      "type": "tower",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 3
+    }
+  ],
+  "Infrastructure": [
+    {
+      "code": "ZN1",
+      "name": "Zone 1",
+      "type": "zone",
+      "parent_id": null,
+      "level": 0,
+      "sort_order": 0
+    },
+    {
+      "code": "PH1",
+      "name": "Phase 1",
+      "type": "phase",
+      "parent_code": "ZN1",
+      "level": 1,
+      "sort_order": 0
+    },
+    {
+      "code": "PT1",
+      "name": "Part 1",
+      "type": "part",
+      "parent_code": "PH1",
+      "level": 2,
+      "sort_order": 0
+    }
+  ]
+}
+
+            const getChildren = (parentId: string | null) =>
+              structureNodes.filter((n: StructureNode) => n.parent_id === parentId)
+                .sort((a: StructureNode, b: StructureNode) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+
+            const getRoots = () => getChildren(null)
+
+            const getNodePath = (id: string): string => {
+              const node = structureNodes.find((n: StructureNode) => n.id === id)
+              if (!node) return ''
+              if (!node.parent_id) return node.code
+              return getNodePath(node.parent_id) + ' > ' + node.code
+            }
+
+            const filteredNodes = structureNodes.filter((n: StructureNode) => {
+              if (nodeTypeFilter && n.type !== nodeTypeFilter) return false
+              if (nodeSearch && !n.code.toLowerCase().includes(nodeSearch.toLowerCase()) && !n.name.toLowerCase().includes(nodeSearch.toLowerCase())) return false
+              return true
+            })
+
+            const toggleExpand = (id: string) => {
+              const next = new Set(expandedNodes)
+              if (next.has(id)) next.delete(id); else next.add(id)
+              setExpandedNodes(next)
+            }
+
+            const expandAll = () => setExpandedNodes(new Set(structureNodes.map((n: StructureNode) => n.id)))
+            const collapseAll = () => setExpandedNodes(new Set())
+
+            const renderTreeNode = (node: StructureNode, depth: number = 0): any => {
+              const children = getChildren(node.id)
+              const hasChildren = children.length > 0
+              const isExpanded = expandedNodes.has(node.id)
+              const isEditing = editingNodeId === node.id
+              const color = NODE_COLORS[node.type] ?? '#888'
+              const isDragOver = dragOverId === node.id
+              const isDragging = draggingId === node.id
+
+              return (
+                <div key={node.id} style={{ opacity: isDragging ? 0.4 : 1 }}>
+                  <div
+                    draggable
+                    onDragStart={() => setDraggingId(node.id)}
+                    onDragEnd={() => { setDraggingId(null); setDragOverId(null) }}
+                    onDragOver={e => { e.preventDefault(); setDragOverId(node.id) }}
+                    onDrop={async e => {
+                      e.preventDefault()
+                      if (!draggingId || draggingId === node.id) return
+                      await run('Move node', () => reorderStructureNode.mutateAsync({ id: draggingId, parent_id: node.parent_id, sort_order: (node.sort_order ?? 0) - 1, projectId: projectId! }))
+                      setDragOverId(null); setDraggingId(null)
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: `6px 10px 6px ${depth * 24 + 10}px`,
+                      borderRadius: 8, marginBottom: 2, cursor: 'grab',
+                      background: isDragOver ? '#e8f5e9' : isEditing ? '#f0f7f4' : 'white',
+                      border: `1px solid ${isDragOver ? '#a5d6a7' : '#f0f0f0'}`,
+                    }}
+                  >
+                    <span onClick={() => hasChildren && toggleExpand(node.id)} style={{ cursor: hasChildren ? 'pointer' : 'default', color: '#aaa', width: 16, userSelect: 'none', fontSize: 12 }}>
+                      {hasChildren ? (isExpanded ? '▼' : '▶') : '◦'}
+                    </span>
+                    <span style={{ background: color + '22', color, padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, minWidth: 70, textAlign: 'center', textTransform: 'capitalize' }}>{node.type}</span>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: 6, flex: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Select value={editNodeForm.type ?? node.type} onChange={e => setEditNodeForm({...editNodeForm, type: e.target.value})}>
+                          {NODE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        </Select>
+                        <Input value={editNodeForm.code ?? node.code} onChange={e => setEditNodeForm({...editNodeForm, code: e.target.value})} style={{width: 80}} placeholder="Code"/>
+                        <Input value={editNodeForm.name ?? node.name} onChange={e => setEditNodeForm({...editNodeForm, name: e.target.value})} placeholder="Name"/>
+                        <Input value={editNodeForm.description ?? ''} onChange={e => setEditNodeForm({...editNodeForm, description: e.target.value})} placeholder="Description" style={{width: 180}}/>
+                        <Select value={editNodeForm.parent_id ?? node.parent_id ?? ''} onChange={e => setEditNodeForm({...editNodeForm, parent_id: e.target.value})}>
+                          <option value="">Root (no parent)</option>
+                          {structureNodes.filter((n: StructureNode) => n.id !== node.id).map((n: StructureNode) => <option key={n.id} value={n.id}>{getNodePath(n.id)} ({n.type})</option>)}
+                        </Select>
+                        <Button onClick={async () => {
+                          await run('Update node', () => updateStructureNode.mutateAsync({ id: node.id, data: { code: editNodeForm.code, name: editNodeForm.name, type: editNodeForm.type as NodeType, description: editNodeForm.description || null, parent_id: editNodeForm.parent_id || null } }))
+                          setEditingNodeId(null)
+                        }} disabled={updateStructureNode.isPending}>Save</Button>
+                        <Button tone="secondary" onClick={() => setEditingNodeId(null)}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <>
+                        <span style={{ fontWeight: 700, color: '#333', minWidth: 60 }}>{node.code}</span>
+                        <span style={{ color: '#555', flex: 1 }}>{node.name}</span>
+                        {node.description && <span style={{ color: '#aaa', fontSize: 12 }}>{node.description}</span>}
+                        <span style={{ color: '#ccc', fontSize: 11 }}>Lv{node.level}</span>
+                        {children.length > 0 && <span style={{ color: '#888', fontSize: 11 }}>{children.length} children</span>}
+                        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                          <button onClick={() => setNodeForm({...nodeForm, parent_id: node.id, type: 'building'})} style={{ padding: '3px 8px', background: '#e8f5e9', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, color: '#2e7d32', fontWeight: 600 }}>+ Child</button>
+                          <button onClick={() => { setEditingNodeId(node.id); setEditNodeForm({ code: node.code, name: node.name, type: node.type, description: node.description ?? '', parent_id: node.parent_id ?? '' }) }} style={{ padding: '3px 8px', background: '#e3f2fd', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, color: '#1565c0' }}>Edit</button>
+                          <button onClick={async () => {
+                            await run('Duplicate', () => createStructureNode.mutateAsync({
+                              project_id: projectId!,
+                              parent_id: node.parent_id,
+                              code: node.code + '_copy',
+                              name: node.name + ' (copy)',
+                              type: node.type,
+                              level: node.level,
+                              sort_order: (node.sort_order ?? 0) + 1,
+                              description: node.description,
+                              is_active: true,
+                            }))
+                          }} style={{ padding: '3px 8px', background: '#fff3e0', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, color: '#e65100' }}>Copy</button>
+                          <button onClick={() => { if (confirm('Delete ' + node.code + ' and all its children?')) run('Delete', () => deleteStructureNode.mutateAsync({ id: node.id, projectId: projectId! })) }} style={{ padding: '3px 8px', background: '#ffebee', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, color: '#c62828' }}>✕</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {isExpanded && hasChildren && children.map((child: StructureNode) => renderTreeNode(child, depth + 1))}
+                </div>
+              )
+            }
+
+            return <>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {(['tree', 'table'] as const).map(id => (
+                    <button key={id} onClick={() => setNodeView(id)} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: nodeView === id ? '#1a6b4a' : '#f0f0f0', color: nodeView === id ? '#fff' : '#333' }}>
+                      {id === 'tree' ? '🌳 Tree View' : '📋 Table View'}
+                    </button>
+                  ))}
+                </div>
+                <input value={nodeSearch} onChange={e => setNodeSearch(e.target.value)} placeholder="🔍 Search nodes..." style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 13, width: 200, fontFamily: 'inherit' }}/>
+                <Select value={nodeTypeFilter} onChange={e => setNodeTypeFilter(e.target.value)} style={{ minWidth: 140 }}>
+                  <option value="">All Types</option>
+                  {NODE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </Select>
+                <Button tone="secondary" onClick={expandAll}>Expand All</Button>
+                <Button tone="secondary" onClick={collapseAll}>Collapse All</Button>
+                <span style={{ marginLeft: 'auto', fontSize: 13, color: '#666' }}>{structureNodes.length} nodes</span>
+              </div>
+
+              {structureNodes.length === 0 && (
+                <div style={{ background: '#f0f7f4', border: '1px solid #c8e6c9', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#1a6b4a', marginBottom: 12 }}>🚀 Quick Start — Choose a Template</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 14 }}>
+                    {Object.keys(TEMPLATES).map(tname => (
+                      <button key={tname} onClick={() => setSelectedTemplate(tname)}
+                        style={{ padding: '10px 14px', background: selectedTemplate === tname ? '#1a6b4a' : '#fff', color: selectedTemplate === tname ? '#fff' : '#333', border: `2px solid ${selectedTemplate === tname ? '#1a6b4a' : '#e0e0e0'}`, borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13, textAlign: 'left' }}>
+                        {tname}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedTemplate && (
+                    <div>
+                      <div style={{ fontSize: 13, color: '#555', marginBottom: 10 }}>Preview: {TEMPLATES[selectedTemplate].map((n: any) => n.code).join(' → ')}</div>
+                      <Button onClick={async () => {
+                        const nodes = TEMPLATES[selectedTemplate]
+                        const codeToId: Record<string, string> = {}
+                        for (const node of nodes) {
+                          const parentId = node.parent_code ? codeToId[node.parent_code] : null
+                          const created = await createStructureNode.mutateAsync({
+                            project_id: projectId!,
+                            parent_id: parentId ?? node.parent_id ?? null,
+                            code: node.code, name: node.name, type: node.type as NodeType,
+                            level: node.level ?? 0, sort_order: node.sort_order ?? 0,
+                            description: null, is_active: true,
+                          })
+                          codeToId[node.code] = created.id
+                        }
+                        expandAll()
+                        setSelectedTemplate('')
+                      }} disabled={createStructureNode.isPending}>
+                        Apply "{selectedTemplate}" Template
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <Card title="Add Node">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+                  <Field label="Type"><Select value={nodeForm.type} onChange={e => setNodeForm({...nodeForm, type: e.target.value as NodeType})}>{NODE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</Select></Field>
+                  <Field label="Code"><Input value={nodeForm.code} onChange={e => setNodeForm({...nodeForm, code: e.target.value})} placeholder="e.g. B1, PH1"/></Field>
+                  <Field label="Name"><Input value={nodeForm.name} onChange={e => setNodeForm({...nodeForm, name: e.target.value})} placeholder="e.g. Building 1"/></Field>
+                  <Field label="Parent">
+                    <Select value={nodeForm.parent_id} onChange={e => setNodeForm({...nodeForm, parent_id: e.target.value})}>
+                      <option value="">Root (no parent)</option>
+                      {structureNodes.map((n: StructureNode) => <option key={n.id} value={n.id}>{getNodePath(n.id)} ({n.type})</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="Description"><Input value={nodeForm.description} onChange={e => setNodeForm({...nodeForm, description: e.target.value})} placeholder="Optional"/></Field>
+                </div>
+                <Toolbar>
+                  <Button onClick={async () => {
+                    if (!nodeForm.code || !nodeForm.name) return
+                    const parentNode = nodeForm.parent_id ? structureNodes.find((n: StructureNode) => n.id === nodeForm.parent_id) : null
+                    await run('Add node', () => createStructureNode.mutateAsync({
+                      project_id: projectId!, parent_id: nodeForm.parent_id || null,
+                      code: nodeForm.code, name: nodeForm.name, type: nodeForm.type,
+                      level: parentNode ? (parentNode.level ?? 0) + 1 : 0,
+                      sort_order: structureNodes.filter((n: StructureNode) => n.parent_id === (nodeForm.parent_id || null)).length,
+                      description: nodeForm.description || null, is_active: true,
+                    }))
+                    if (nodeForm.parent_id) { const next = new Set(expandedNodes); next.add(nodeForm.parent_id); setExpandedNodes(next) }
+                    setNodeForm({...nodeForm, code: '', name: '', description: ''})
+                  }} disabled={createStructureNode.isPending || !nodeForm.code || !nodeForm.name}>+ Add Node</Button>
+                </Toolbar>
               </Card>
-              <Card title="Subcontractors list">
-                <div style={{ overflowX: 'auto' }}>
+
+              {nodeView === 'tree' && (
+                <Card title="Project Structure Tree">
+                  {structureNodes.length === 0 ? (
+                    <div style={{ color: '#888', padding: 20, textAlign: 'center' }}>No nodes yet. Add a node above or choose a template.</div>
+                  ) : (
+                    <div style={{ background: '#fafafa', borderRadius: 10, padding: 12 }}>
+                      {(nodeSearch || nodeTypeFilter ? filteredNodes : getRoots()).map((node: StructureNode) => renderTreeNode(node, 0))}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {nodeView === 'table' && (
+                <Card title="All Nodes — Table View">
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr style={{ background: '#1a6b4a', color: '#fff' }}>
-                      {['Code','Name','Contact','Phone','Retention %','Advance Amt','Recovery %','Status','Actions'].map(h => <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600 }}>{h}</th>)}
+                      {['Type','Code','Name','Parent','Level','Description','Actions'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>{h}</th>)}
                     </tr></thead>
                     <tbody>
-                      {subcontractors.map((s) => {
-                        const isEditing = editingSubId === s.id
+                      {filteredNodes.map((n: StructureNode) => {
+                        const parent = structureNodes.find((p: StructureNode) => p.id === n.parent_id)
+                        const color = NODE_COLORS[n.type] ?? '#888'
                         return (
-                          <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0', background: isEditing ? '#f0f7f4' : 'white' }}>
-                            {isEditing ? <>
-                              <td style={{ padding: '5px 6px' }}><Input value={editSubForm.subcontractor_code ?? ''} onChange={e => setEditSubForm({ ...editSubForm, subcontractor_code: e.target.value })} style={{ width: 80 }} /></td>
-                              <td style={{ padding: '5px 6px' }}><Input value={editSubForm.name ?? ''} onChange={e => setEditSubForm({ ...editSubForm, name: e.target.value })} /></td>
-                              <td style={{ padding: '5px 6px' }}><Input value={editSubForm.contact_person ?? ''} onChange={e => setEditSubForm({ ...editSubForm, contact_person: e.target.value })} /></td>
-                              <td style={{ padding: '5px 6px' }}><Input value={editSubForm.phone ?? ''} onChange={e => setEditSubForm({ ...editSubForm, phone: e.target.value })} style={{ width: 110 }} /></td>
-                              <td style={{ padding: '5px 6px' }}><Input type="number" value={editSubForm.default_retention_pct ?? ''} onChange={e => setEditSubForm({ ...editSubForm, default_retention_pct: e.target.value })} style={{ width: 60 }} /></td>
-                              <td style={{ padding: '5px 6px' }}><Input type="number" value={editSubForm.advance_amount ?? ''} onChange={e => setEditSubForm({ ...editSubForm, advance_amount: e.target.value })} style={{ width: 100 }} /></td>
-                              <td style={{ padding: '5px 6px' }}><Input type="number" value={editSubForm.advance_recovery_pct ?? ''} onChange={e => setEditSubForm({ ...editSubForm, advance_recovery_pct: e.target.value })} style={{ width: 60 }} /></td>
-                              <td style={{ padding: '5px 6px' }}><Select value={editSubForm.status ?? ''} onChange={e => setEditSubForm({ ...editSubForm, status: e.target.value })}>{['Active','Inactive','Suspended'].map(st => <option key={st} value={st}>{st}</option>)}</Select></td>
-                              <td style={{ padding: '5px 6px' }}><div style={{ display: 'flex', gap: 4 }}>
-                                <Button onClick={async () => { await run('Update Sub', () => updateSubcontractor.mutateAsync({ id: s.id, data: { subcontractor_code: editSubForm.subcontractor_code, name: editSubForm.name, contact_person: editSubForm.contact_person||null, phone: editSubForm.phone||null, default_retention_pct: parseFloat(editSubForm.default_retention_pct)||5, advance_amount: parseFloat(editSubForm.advance_amount)||null, advance_recovery_pct: parseFloat(editSubForm.advance_recovery_pct)||null, status: editSubForm.status } })); setEditingSubId(null) }} disabled={updateSubcontractor.isPending}>Save</Button>
-                                <Button tone="secondary" onClick={() => setEditingSubId(null)}>Cancel</Button>
-                              </div></td>
-                            </> : <>
-                              <td style={{ padding: '7px 10px', fontWeight: 700 }}>{s.subcontractor_code}</td>
-                              <td style={{ padding: '7px 10px' }}>{s.name}</td>
-                              <td style={{ padding: '7px 10px', color: '#666' }}>{s.contact_person ?? '—'}</td>
-                              <td style={{ padding: '7px 10px', color: '#666' }}>{s.phone ?? '—'}</td>
-                              <td style={{ padding: '7px 10px', textAlign: 'right' }}>{s.default_retention_pct}%</td>
-                              <td style={{ padding: '7px 10px', textAlign: 'right' }}>{s.advance_amount ? money(s.advance_amount) : '—'}</td>
-                              <td style={{ padding: '7px 10px', textAlign: 'right' }}>{s.advance_recovery_pct ? `${s.advance_recovery_pct}%` : '—'}</td>
-                              <td style={{ padding: '7px 10px' }}><span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: s.status === 'Active' ? '#e8f5e9' : '#fff3e0', color: s.status === 'Active' ? '#2e7d32' : '#e65100' }}>{s.status}</span></td>
-                              <td style={{ padding: '7px 10px' }}><div style={{ display: 'flex', gap: 4 }}>
-                                <Button tone="secondary" onClick={() => { setEditingSubId(s.id); setEditSubForm({ subcontractor_code: s.subcontractor_code, name: s.name, contact_person: s.contact_person ?? '', phone: s.phone ?? '', default_retention_pct: String(s.default_retention_pct), advance_amount: String(s.advance_amount ?? ''), advance_recovery_pct: String(s.advance_recovery_pct ?? ''), status: s.status }) }}>Edit</Button>
-                                <Button tone="danger" onClick={() => { if (confirm('Delete?')) run('Delete', () => deleteSubcontractor.mutateAsync({ id: s.id, projectId: projectId! })) }}>✕</Button>
-                              </div></td>
-                            </>}
+                          <tr key={n.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: '7px 12px' }}><span style={{ background: color + '22', color, padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, textTransform: 'capitalize' }}>{n.type}</span></td>
+                            <td style={{ padding: '7px 12px', fontWeight: 700 }}>{n.code}</td>
+                            <td style={{ padding: '7px 12px' }}>{n.name}</td>
+                            <td style={{ padding: '7px 12px', color: '#888' }}>{parent ? parent.code + ' — ' + parent.name : '—'}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'center' }}>{n.level}</td>
+                            <td style={{ padding: '7px 12px', color: '#888', fontSize: 12 }}>{n.description ?? '—'}</td>
+                            <td style={{ padding: '7px 12px' }}>
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                <Button tone="secondary" onClick={() => { setEditingNodeId(n.id); setEditNodeForm({ code: n.code, name: n.name, type: n.type, description: n.description ?? '', parent_id: n.parent_id ?? '' }); setNodeView('tree') }}>Edit</Button>
+                                <Button tone="danger" onClick={() => { if (confirm('Delete?')) run('Delete', () => deleteStructureNode.mutateAsync({ id: n.id, projectId: projectId! })) }}>✕</Button>
+                              </div>
+                            </td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
-                </div>
-              </Card>
+                </Card>
+              )}
             </>
-          )}
+          })()}
 
           {activeView === 'boq' && (
             <>
@@ -1305,7 +1687,7 @@ export default function DashboardPage() {
                         return (
                           <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', background: isEditing ? '#f0f7f4' : 'white' }}>
                             {isEditing ? <>
-                              <td style={{ padding: '5px 6px' }}><Select value={editBoqForm.structure_id ?? ''} onChange={e => setEditBoqForm({ ...editBoqForm, structure_id: e.target.value })}><option value="">—</option>{structures.filter((st: any) => st.type === 'Building' || st.type === 'Villa').map((st: any) => <option key={st.id} value={st.id}>{st.code}</option>)}</Select></td>
+                              <td style={{ padding: '5px 6px' }}><Select value={editBoqForm.structure_id ?? ''} onChange={e => setEditBoqForm({ ...editBoqForm, structure_id: e.target.value })}><option value="">—</option>{structureNodes.map((n: StructureNode) => <option key={n.id} value={n.id}>{n.code} — {n.name} ({n.type})</option>)}</Select></td>
                               <td style={{ padding: '5px 6px' }}><Input value={editBoqForm.item_code ?? ''} onChange={e => setEditBoqForm({ ...editBoqForm, item_code: e.target.value })} style={{ width: 80 }} /></td>
                               <td style={{ padding: '5px 6px' }}><Input value={editBoqForm.description ?? ''} onChange={e => setEditBoqForm({ ...editBoqForm, description: e.target.value })} /></td>
                               <td style={{ padding: '5px 6px' }}><Input value={editBoqForm.unit ?? ''} onChange={e => setEditBoqForm({ ...editBoqForm, unit: e.target.value })} style={{ width: 60 }} /></td>
@@ -1439,9 +1821,7 @@ export default function DashboardPage() {
                     <Field label="Structure (optional — for per-building entry)">
                       <Select value={selectedStructureForQto} onChange={e => setSelectedStructureForQto(e.target.value)}>
                         <option value="">All Structures / General</option>
-                        {structures.filter(s => s.type === 'Building' || s.type === 'Villa').map(s => (
-                          <option key={s.id} value={s.id}>{s.type} — {s.code} — {s.name}</option>
-                        ))}
+                        {structureNodes.map((n: StructureNode) => <option key={n.id} value={n.id}>{n.code} — {n.name} ({n.type})</option>)}
                       </Select>
                     </Field>
                   </div>
@@ -2933,8 +3313,8 @@ export default function DashboardPage() {
             if (!projectId) return <Card title="Villa Tracker"><div>Select a project first.</div></Card>
 
             // ── helpers ──────────────────────────────────────────────
-            const phases = structures.filter(s => s.type === 'Phase')
-            const villaTypes = structures.filter(s => s.type === 'Villa' || s.type === 'Building')
+            const phases = structureNodes.filter((n: StructureNode) => n.type === 'phase')
+            const villaTypes = structureNodes.filter((n: StructureNode) => ['villa','building','tower','cluster','block'].includes(n.type))
             
             const progressFor = (unitId: string, trade: TradeType) =>
               villaProgress.find((p: any) => p.villa_unit_id === unitId && p.trade === trade)?.completion_pct ?? 0

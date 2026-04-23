@@ -12,7 +12,7 @@ import type {
   Subcontractor, SubcontractorInsert,
   BoqItem, BoqItemInsert,
   SubcontractBreakdown, SubcontractBreakdownInsert,
-  QsEntry, QsEntryInsert, TenderItem, TenderItemInsert, CostCategory, ScheduleActivity, ScheduleActivityInsert, ActivityStatus, QtoLine, QtoLineInsert, QtoLineUpdate, VillaUnit, VillaUnitInsert, VillaProgress, VillaProgressInsert, VillaProgressUpdate, TradeType,
+  QsEntry, QsEntryInsert, StructureNode, StructureNodeInsert, StructureNodeUpdate, NodeType, TenderItem, TenderItemInsert, CostCategory, ScheduleActivity, ScheduleActivityInsert, ActivityStatus, QtoLine, QtoLineInsert, QtoLineUpdate, VillaUnit, VillaUnitInsert, VillaProgress, VillaProgressInsert, VillaProgressUpdate, TradeType,
   Certificate, CertificateInsert,
   CertificateLine, CertificateLineInsert,
   TechnicalRecord, TechnicalRecordInsert,
@@ -988,5 +988,78 @@ export function useDeleteQsEntry() {
       if (error) throw error
     },
     onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.qs.list(vars.projectId) }),
+  })
+}
+
+// ── Structure Nodes ───────────────────────────────────────────────
+export function useStructureNodes(projectId: string | null) {
+  const supabase = createClient()
+  return useQuery({
+    queryKey: ['structure_nodes', projectId],
+    enabled: !!projectId,
+    queryFn: async (): Promise<StructureNode[]> => unwrap(
+      await supabase.from('project_structure_nodes')
+        .select('*')
+        .eq('project_id', projectId!)
+        .order('level')
+        .order('sort_order'),
+      []
+    ),
+  })
+}
+
+export function useCreateStructureNode() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: StructureNodeInsert): Promise<StructureNode> =>
+      unwrap(await supabase.from('project_structure_nodes').insert(input as any).select().single()),
+    onSuccess: (r) => qc.invalidateQueries({ queryKey: ['structure_nodes', r.project_id] }),
+  })
+}
+
+export function useUpdateStructureNode() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: StructureNodeUpdate }): Promise<StructureNode> =>
+      unwrap(await supabase.from('project_structure_nodes').update(data as any).eq('id', id).select().single()),
+    onSuccess: (r) => qc.invalidateQueries({ queryKey: ['structure_nodes', r.project_id] }),
+  })
+}
+
+export function useDeleteStructureNode() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }): Promise<void> => {
+      const { error } = await supabase.from('project_structure_nodes').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['structure_nodes', vars.projectId] }),
+  })
+}
+
+export function useBulkCreateStructureNodes() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ projectId, nodes }: { projectId: string; nodes: Omit<StructureNodeInsert, 'project_id'>[] }): Promise<StructureNode[]> => {
+      const rows = nodes.map(n => ({ ...n, project_id: projectId }))
+      return unwrap(await supabase.from('project_structure_nodes').insert(rows as any).select(), [])
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['structure_nodes', vars.projectId] }),
+  })
+}
+
+export function useReorderStructureNode() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, sort_order, parent_id, projectId }: { id: string; sort_order: number; parent_id: string | null; projectId: string }) => {
+      const { error } = await supabase.from('project_structure_nodes').update({ sort_order, parent_id } as any).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['structure_nodes', vars.projectId] }),
   })
 }
