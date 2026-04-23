@@ -754,3 +754,70 @@ export function useUpsertVillaProgress() {
     },
   })
 }
+
+// ── Invoice Lines ─────────────────────────────────────────────────
+export function useInvoiceLines(invoiceId: string | null) {
+  const supabase = createClient()
+  return useQuery({
+    queryKey: ['invoice_lines', invoiceId],
+    enabled: !!invoiceId,
+    queryFn: async (): Promise<any[]> => unwrap(
+      await supabase.from('subcontractor_invoice_lines')
+        .select('*, subcontract_breakdown(assignment_key, subcontract_qty, rate, boq_items(item_code, description, unit, boq_qty))')
+        .eq('invoice_id', invoiceId!),
+      []
+    ),
+  })
+}
+
+export function useBulkUpsertInvoiceLines() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ invoiceId, lines }: { invoiceId: string; lines: any[] }): Promise<any[]> => {
+      // Delete existing lines first
+      await supabase.from('subcontractor_invoice_lines').delete().eq('invoice_id', invoiceId)
+      if (!lines.length) return []
+      return unwrap(await supabase.from('subcontractor_invoice_lines').insert(lines).select(), [])
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['invoice_lines', vars.invoiceId] }),
+  })
+}
+
+export function usePreviousCumulativeQty(projectId: string | null, subcontractorId: string | null, breakdownId: string | null, currentInvoiceId: string | null) {
+  const supabase = createClient()
+  return useQuery({
+    queryKey: ['prev_cumulative', projectId, subcontractorId, breakdownId, currentInvoiceId],
+    enabled: !!projectId && !!subcontractorId && !!breakdownId,
+    queryFn: async (): Promise<number> => {
+      // Get all approved/paid invoices BEFORE current one for this subcontractor
+      const { data: invoices } = await supabase.from('subcontractor_invoices')
+        .select('id, created_at')
+        .eq('project_id', projectId!)
+        .eq('subcontractor_id', subcontractorId!)
+        .in('status', ['Approved', 'Paid'])
+        .order('created_at', { ascending: true })
+      
+      if (!invoices?.length) return 0
+      
+      // Filter invoices before current one
+      const currentInvoice = currentInvoiceId ? invoices.find(i => i.id === currentInvoiceId) : null
+      const prevInvoices = currentInvoice 
+        ? invoices.filter(i => new Date(i.created_at) < new Date(currentInvoice.created_at))
+        : invoices
+      
+      if (!prevInvoices.length) return 0
+      
+      // Sum current_qty from previous invoice lines for this breakdown
+      let total = 0
+      for (const inv of prevInvoices) {
+        const { data: lines } = await supabase.from('subcontractor_invoice_lines')
+          .select('current_qty')
+          .eq('invoice_id', inv.id)
+          .eq('breakdown_id', breakdownId!)
+        total += (lines ?? []).reduce((s, l) => s + (l.current_qty ?? 0), 0)
+      }
+      return total
+    },
+  })
+}

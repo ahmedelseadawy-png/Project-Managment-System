@@ -59,6 +59,8 @@ import {
   useUpdateQtoLine,
   useDeleteQtoLine,
   useDeleteCertificate,
+  useInvoiceLines,
+  useBulkUpsertInvoiceLines,
   useVillaUnits,
   useBulkCreateVillaUnits,
   useUpdateVillaUnit,
@@ -112,6 +114,10 @@ export default function DashboardPage() {
   const reviewQs = useReviewQsEntry()
   const createCertificate = useCreateCertificate()
   const deleteCertificate = useDeleteCertificate()
+  const bulkUpsertInvoiceLines = useBulkUpsertInvoiceLines()
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
+  const [invoiceLineEdits, setInvoiceLineEdits] = useState<Record<string, { current_qty: string; current_work_pct: string }>>({})
+  const [invoiceTab, setInvoiceTab] = useState<'list'|'breakdown'>('list')
   const approveCertificate = useApproveCertificate()
   const createTechnical = useCreateTechnicalRecord()
   const setTechnicalStatus = useSetTechnicalStatus()
@@ -1562,75 +1568,324 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          {activeView === 'certificates' && (
-            <>
-              <Card title="Create Subcontractor Invoice">
-                {!projectId ? <div>Select a project first.</div> : <>
+          {activeView === 'certificates' && (() => {
+            if (!projectId) return <Card title="Subcontractor Invoices"><div>Select a project first.</div></Card>
+
+            // ── Invoice breakdown helpers ─────────────────────────
+            const selectedInvoice = certificates.find((c: any) => c.id === selectedInvoiceId)
+            const selectedSubId = selectedInvoice?.subcontractor_id ?? null
+
+            // Get breakdown items for selected subcontractor
+            const subBreakdown = breakdowns.filter((b: any) => b.subcontractor_id === selectedSubId)
+
+            // Get previous cumulative qty for each breakdown item
+            const getPrevQty = (breakdownId: string): number => {
+              const prevInvoices = certificates.filter((c: any) =>
+                c.subcontractor_id === selectedSubId &&
+                ['Approved', 'Paid'].includes(c.status) &&
+                c.id !== selectedInvoiceId
+              )
+              // This is simplified — in production you'd query invoice lines
+              return 0
+            }
+
+            // Get effective QS qty for a breakdown item
+            const getEffectiveQty = (b: any): number => {
+              const boqItemId = b.boq_item_id
+              const qsEntry = qtoLines.find((l: any) => l.boq_item_id === boqItemId)
+              return qsEntry ? qsEntry.qty : (b.subcontract_qty ?? b.boq_items?.boq_qty ?? 0)
+            }
+
+            const getEdit = (id: string) => invoiceLineEdits[id] ?? {
+              current_qty: '',
+              current_work_pct: ''
+            }
+
+            // Calculate invoice totals from line edits
+            const calcLineTotals = () => {
+              let gross = 0
+              subBreakdown.forEach((b: any) => {
+                const edit = getEdit(b.id)
+                const currentQty = parseFloat(edit.current_qty) || 0
+                gross += currentQty * (b.rate ?? 0)
+              })
+              return gross
+            }
+
+            return <>
+              {/* Tabs */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
+                {([['list','📋 Invoices'], ['breakdown','📊 Invoice Breakdown']] as const).map(([id, label]) => (
+                  <button key={id} onClick={() => setInvoiceTab(id)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: invoiceTab === id ? '#1a6b4a' : '#f0f0f0', color: invoiceTab === id ? '#fff' : '#333' }}>{label}</button>
+                ))}
+              </div>
+
+              {/* ── TAB 1: INVOICE LIST ── */}
+              {invoiceTab === 'list' && <>
+                <Card title="Create Subcontractor Invoice">
                   <FormGrid>
                     <Field label="Subcontractor"><Select value={certForm.subcontractor_id} onChange={(e) => setCertForm({ ...certForm, subcontractor_id: e.target.value })}><option value="">Select</option>{subcontractors.map((s) => <option key={s.id} value={s.id}>{s.subcontractor_code} — {s.name}</option>)}</Select></Field>
-                    <Field label="Invoice No"><Input value={certForm.invoice_no} onChange={(e) => setCertForm({ ...certForm, invoice_no: e.target.value })} {...{placeholder: (() => {
-                        const sub = subcontractors.find(s => s.id === certForm.subcontractor_id)
-                        const initials = sub ? (sub.name ?? 'XX').split(' ').map((w: string) => w[0]?.toUpperCase() ?? '').join('').slice(0,3) : 'XXX'
-                        return `Auto: INV-${initials}-${String(nextCertNo).padStart(3,'0')}`
-                      })()}} /></Field>
+                    <Field label="Invoice No"><Input value={certForm.invoice_no} onChange={(e) => setCertForm({ ...certForm, invoice_no: e.target.value })} {...{placeholder: (() => { const sub = subcontractors.find(s => s.id === certForm.subcontractor_id); const initials = sub ? (sub.name ?? 'XX').split(' ').map((w: string) => w[0]?.toUpperCase() ?? '').join('').slice(0,3) : 'XXX'; return `Auto: INV-${initials}-${String(nextCertNo).padStart(3,'0')}` })()} } /></Field>
                     <Field label="Invoice Date"><Input type="date" value={certForm.invoice_date} onChange={(e) => setCertForm({ ...certForm, invoice_date: e.target.value })} /></Field>
                     <Field label="Period End"><Input type="date" value={certForm.period_end} onChange={(e) => setCertForm({ ...certForm, period_end: e.target.value })} /></Field>
-                    <Field label="Gross Amount"><Input type="number" value={certForm.gross_amount} onChange={(e) => setCertForm({ ...certForm, gross_amount: e.target.value })} /></Field>
                     <Field label="Retention %"><Input type="number" value={certForm.retention_pct} onChange={(e) => setCertForm({ ...certForm, retention_pct: e.target.value })} /></Field>
                     <Field label="Remarks"><Input value={certForm.remarks} onChange={(e) => setCertForm({ ...certForm, remarks: e.target.value })} /></Field>
                   </FormGrid>
-                  {n(certForm.gross_amount) > 0 && (
-                    <div style={{ margin: '12px 0', padding: '10px 16px', background: '#f0f7f4', borderRadius: 8, fontSize: 13, display: 'flex', gap: 24 }}>
-                      <span>Gross: <strong>{money(n(certForm.gross_amount))}</strong></span>
-                      <span>Retention ({certForm.retention_pct}%): <strong style={{ color: '#e65100' }}>{money(n(certForm.gross_amount) * n(certForm.retention_pct) / 100)}</strong></span>
-                      <span>Net Amount: <strong style={{ color: '#1a6b4a', fontSize: 15 }}>{money(n(certForm.gross_amount) - n(certForm.gross_amount) * n(certForm.retention_pct) / 100)}</strong></span>
-                    </div>
-                  )}
                   <Toolbar><Button onClick={addCertificate} disabled={createCertificate.isPending || !certForm.subcontractor_id || !certForm.period_end}>Create Invoice</Button></Toolbar>
-                </>}
-              </Card>
-              <Card title="Subcontractor Invoices">
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ background: '#1a6b4a', color: '#fff' }}>
-                      {['Subcontractor', 'Invoice No', 'Invoice Date', 'Period End', 'Gross Amount', 'Retention', 'Net Amount', 'Status', 'Actions'].map(h => (
-                        <th key={h} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 600 }}>{h}</th>
+                </Card>
+
+                <Card title="Subcontractor Invoices">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#1a6b4a', color: '#fff' }}>
+                        {['Subcontractor','Invoice No','Period End','Gross Amount','Retention','Net Amount','Status','Actions'].map(h => (
+                          <th key={h} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 600 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {certificates.length === 0 && <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#888' }}>No invoices yet.</td></tr>}
+                      {certificates.map((c: any) => {
+                        const statusColor: Record<string, string> = { Draft: '#888', Submitted: '#1565c0', Approved: '#2e7d32', Paid: '#1a6b4a', Cancelled: '#c62828' }
+                        return (
+                          <tr key={c.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: '8px 12px', fontWeight: 600 }}>{c.subcontractors ? `${c.subcontractors.subcontractor_code} — ${c.subcontractors.name}` : '—'}</td>
+                            <td style={{ padding: '8px 12px' }}>{c.invoice_no}</td>
+                            <td style={{ padding: '8px 12px', color: '#666' }}>{c.period_end}</td>
+                            <td style={{ padding: '8px 12px' }}>{money(c.gross_amount)}</td>
+                            <td style={{ padding: '8px 12px', color: '#e65100' }}>{money(c.retention_amount)}</td>
+                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#1a6b4a' }}>{money(c.net_amount)}</td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <span style={{ background: (statusColor[c.status] ?? '#888') + '22', color: statusColor[c.status] ?? '#888', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <Button tone="secondary" onClick={() => { setSelectedInvoiceId(c.id); setInvoiceTab('breakdown'); const edits: Record<string, {current_qty:string;current_work_pct:string}> = {}; breakdowns.filter((b:any)=>b.subcontractor_id===c.subcontractor_id).forEach((b:any)=>{ edits[b.id]={current_qty:'',current_work_pct:''} }); setInvoiceLineEdits(edits) }}>Open Breakdown</Button>
+                                {c.status === 'Draft' && <Button tone="secondary" disabled={approveCertificate.isPending} onClick={() => run('Approve', () => approveCertificate.mutateAsync({ id: c.id, status: 'Approved' }))}>Approve</Button>}
+                                {c.status === 'Approved' && <Button tone="secondary" disabled={approveCertificate.isPending} onClick={() => run('Pay', () => approveCertificate.mutateAsync({ id: c.id, status: 'Paid', paymentDate: today() }))}>Mark Paid</Button>}
+                                <Button tone="danger" disabled={deleteCertificate.isPending} onClick={() => run('Delete', () => deleteCertificate.mutateAsync({ id: c.id, projectId: projectId! }))}>Delete</Button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </Card>
+              </>}
+
+              {/* ── TAB 2: INVOICE BREAKDOWN ── */}
+              {invoiceTab === 'breakdown' && (() => {
+                if (!selectedInvoice) return (
+                  <Card title="Invoice Breakdown">
+                    <div style={{ color: '#888', padding: 20 }}>Select an invoice from the list and click "Open Breakdown".</div>
+                  </Card>
+                )
+
+                const sub = subcontractors.find(s => s.id === selectedInvoice.subcontractor_id)
+                const lines = subBreakdown
+
+                // Calculate totals
+                let grossTotal = 0
+                lines.forEach((b: any) => {
+                  const edit = getEdit(b.id)
+                  const qty = parseFloat(edit.current_qty) || 0
+                  grossTotal += qty * (b.rate ?? 0)
+                })
+                const retentionAmt = grossTotal * (n(certForm.retention_pct) || n(selectedInvoice.retention_pct) || 5) / 100
+                const netAmt = grossTotal - retentionAmt
+
+                return <>
+                  {/* Invoice header */}
+                  <div style={{ background: '#1a1a2e', color: '#fff', borderRadius: 12, padding: '20px 28px', marginBottom: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Subcontractor Payment Invoice</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{sub?.name ?? '—'}</div>
+                        <div style={{ fontSize: 13, color: '#aaa' }}>Invoice No: {selectedInvoice.invoice_no} · Period End: {selectedInvoice.period_end}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 11, color: '#aaa', marginBottom: 4 }}>Net Payable</div>
+                        <div style={{ fontSize: 28, fontWeight: 800, color: '#66bb6a' }}>{money(netAmt || selectedInvoice.net_amount)}</div>
+                        <span style={{ fontSize: 12, padding: '3px 10px', background: '#ffffff22', borderRadius: 20 }}>{selectedInvoice.status}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Breakdown table */}
+                  <Card title={`Breakdown — ${lines.length} BOQ Items`}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: '#1a6b4a', color: '#fff' }}>
+                            {['#','Item Code','Description','Unit','Contract Qty','Prev. Cum. Qty','Current Qty','Cum. Qty','Rate','Prev. Value','Current Value','Cum. Value','% Complete'].map(h => (
+                              <th key={h} style={{ padding: '9px 10px', textAlign: h === '#' ? 'center' : 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lines.map((b: any, idx: number) => {
+                            const edit = getEdit(b.id)
+                            const effectiveQty = getEffectiveQty(b)
+                            const contractQty = b.subcontract_qty ?? 0
+                            const prevQty = getPrevQty(b.id)
+                            const currentQty = parseFloat(edit.current_qty) || 0
+                            const cumQty = prevQty + currentQty
+                            const rate = b.rate ?? 0
+                            const prevValue = prevQty * rate
+                            const currentValue = currentQty * rate
+                            const cumValue = cumQty * rate
+                            const pctComplete = contractQty > 0 ? Math.min((cumQty / contractQty) * 100, 100) : 0
+                            const boqItem = b.boq_items as any
+
+                            return (
+                              <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                <td style={{ padding: '7px 10px', textAlign: 'center', color: '#888' }}>{idx + 1}</td>
+                                <td style={{ padding: '7px 10px', fontWeight: 700 }}>{boqItem?.item_code ?? b.assignment_key}</td>
+                                <td style={{ padding: '7px 10px', maxWidth: 200 }}>{boqItem?.description ?? '—'}</td>
+                                <td style={{ padding: '7px 10px', color: '#666' }}>{boqItem?.unit ?? '—'}</td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right' }}>{contractQty}</td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right', color: '#888' }}>{prevQty.toFixed(3)}</td>
+                                <td style={{ padding: '7px 10px', minWidth: 100 }}>
+                                  <Input
+                                    type="number"
+                                    value={edit.current_qty}
+                                    onChange={e => setInvoiceLineEdits({ ...invoiceLineEdits, [b.id]: { ...getEdit(b.id), current_qty: e.target.value } })}
+                                    placeholder={String(effectiveQty)}
+                                    style={{ width: 90, padding: '4px 8px', fontSize: 12 }}
+                                  />
+                                </td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>{cumQty.toFixed(3)}</td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right' }}>{money(rate)}</td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right', color: '#888' }}>{money(prevValue)}</td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#1a6b4a' }}>{money(currentValue)}</td>
+                                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700 }}>{money(cumValue)}</td>
+                                <td style={{ padding: '7px 10px', minWidth: 100 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <div style={{ flex: 1, height: 6, background: '#e8e8e8', borderRadius: 999, overflow: 'hidden' }}>
+                                      <div style={{ width: `${pctComplete}%`, height: '100%', background: pctComplete >= 100 ? '#2e7d32' : pctComplete >= 50 ? '#f9a825' : '#1565c0', borderRadius: 999 }} />
+                                    </div>
+                                    <span style={{ fontSize: 11, color: '#666', minWidth: 30 }}>{pctComplete.toFixed(0)}%</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                          {/* Totals row */}
+                          <tr style={{ background: '#f0f7f4', fontWeight: 800, fontSize: 13 }}>
+                            <td colSpan={10} style={{ padding: '10px 10px', color: '#1a6b4a' }}>TOTAL</td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right', color: '#1a6b4a', fontSize: 15 }}>{money(grossTotal)}</td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right', color: '#1a6b4a', fontSize: 15 }}>{money(grossTotal)}</td>
+                            <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Financial summary */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginTop: 20 }}>
+                      {[
+                        ['Gross Amount', money(grossTotal), '#1565c0'],
+                        [`Retention (${selectedInvoice.retention_pct ?? 5}%)`, money(retentionAmt), '#e65100'],
+                        ['Net Payable', money(netAmt), '#1a6b4a'],
+                        ['Items', `${lines.length} BOQ items`, '#888'],
+                      ].map(([l,v,c]) => (
+                        <div key={l} style={{ background: '#f8f8f8', borderRadius: 8, padding: '12px 16px', borderLeft: `4px solid ${c}` }}>
+                          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{l}</div>
+                          <div style={{ fontWeight: 800, color: c, fontSize: 16 }}>{v}</div>
+                        </div>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {certificates.length === 0 && (
-                      <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: '#888' }}>No invoices yet.</td></tr>
-                    )}
-                    {certificates.map((c: any) => {
-                      const statusColor: Record<string, string> = { Draft: '#888', Submitted: '#1565c0', Approved: '#2e7d32', Paid: '#1a6b4a', Cancelled: '#c62828' }
-                      return (
-                        <tr key={c.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={{ padding: '8px 12px', fontWeight: 600 }}>{c.subcontractors ? `${c.subcontractors.subcontractor_code} — ${c.subcontractors.name}` : '—'}</td>
-                          <td style={{ padding: '8px 12px' }}>{c.invoice_no}</td>
-                          <td style={{ padding: '8px 12px', color: '#666' }}>{c.invoice_date}</td>
-                          <td style={{ padding: '8px 12px', color: '#666' }}>{c.period_end}</td>
-                          <td style={{ padding: '8px 12px' }}>{money(c.gross_amount)}</td>
-                          <td style={{ padding: '8px 12px', color: '#e65100' }}>{money(c.retention_amount)}</td>
-                          <td style={{ padding: '8px 12px', fontWeight: 700, color: '#1a6b4a' }}>{money(c.net_amount)}</td>
-                          <td style={{ padding: '8px 12px' }}>
-                            <span style={{ background: (statusColor[c.status] ?? '#888') + '22', color: statusColor[c.status] ?? '#888', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{c.status}</span>
-                          </td>
-                          <td style={{ padding: '8px 12px' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              {c.status === 'Draft' && <Button tone="secondary" disabled={approveCertificate.isPending} onClick={() => run('Approve', () => approveCertificate.mutateAsync({ id: c.id, status: 'Approved' }))}>Approve</Button>}
-                              {c.status === 'Approved' && <Button tone="secondary" disabled={approveCertificate.isPending} onClick={() => run('Pay', () => approveCertificate.mutateAsync({ id: c.id, status: 'Paid', paymentDate: today() }))}>Mark Paid</Button>}
-                              <Button tone="danger" disabled={deleteCertificate.isPending} onClick={() => run('Delete', () => deleteCertificate.mutateAsync({ id: c.id, projectId: projectId! }))}>Delete</Button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </Card>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+                      <Button onClick={async () => {
+                        if (!selectedInvoiceId) return
+                        const linesToSave = lines.map((b: any) => {
+                          const edit = getEdit(b.id)
+                          const currentQty = parseFloat(edit.current_qty) || getEffectiveQty(b)
+                          const prevQty = getPrevQty(b.id)
+                          const rate = b.rate ?? 0
+                          return {
+                            invoice_id: selectedInvoiceId,
+                            project_id: projectId!,
+                            subcontractor_id: selectedInvoice.subcontractor_id,
+                            breakdown_id: b.id,
+                            boq_item_id: b.boq_item_id,
+                            structure_id: b.structure_id ?? null,
+                            boq_qty: b.subcontract_qty ?? 0,
+                            previous_cumulative_qty: prevQty,
+                            current_qty: currentQty,
+                            new_cumulative_qty: prevQty + currentQty,
+                            rate,
+                            current_value: currentQty * rate,
+                            cumulative_value: (prevQty + currentQty) * rate,
+                            current_work_pct: b.subcontract_qty > 0 ? ((prevQty + currentQty) / b.subcontract_qty) * 100 : 0,
+                            qs_status: 'Approved',
+                            approved_qty: currentQty,
+                          }
+                        })
+                        await run('Save breakdown', async () => {
+                          await bulkUpsertInvoiceLines.mutateAsync({ invoiceId: selectedInvoiceId, lines: linesToSave })
+                          // Update invoice gross amount
+                          await approveCertificate.mutateAsync({ id: selectedInvoiceId, status: selectedInvoice.status, gross_amount: grossTotal, retention_amount: retentionAmt, net_amount: netAmt } as any)
+                        })
+                      }} disabled={bulkUpsertInvoiceLines.isPending}>💾 Save Breakdown</Button>
+
+                      <Button tone="secondary" onClick={() => {
+                        // PDF Export
+                        const sub2 = subcontractors.find(s => s.id === selectedInvoice.subcontractor_id)
+                        const printContent = `
+                          <html><head><title>Invoice ${selectedInvoice.invoice_no}</title>
+                          <style>
+                            body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+                            h1 { color: #1a6b4a; font-size: 18px; }
+                            h2 { font-size: 14px; color: #333; margin-top: 4px; }
+                            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                            th { background: #1a6b4a; color: white; padding: 8px; text-align: left; font-size: 11px; }
+                            td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+                            tr:nth-child(even) { background: #f9f9f9; }
+                            .total-row { background: #e8f5e9; font-weight: bold; }
+                            .summary { margin-top: 20px; display: flex; gap: 20px; }
+                            .summary-box { border: 1px solid #ddd; padding: 12px; border-radius: 8px; min-width: 150px; }
+                            .summary-box label { font-size: 10px; color: #888; display: block; margin-bottom: 4px; }
+                            .summary-box span { font-size: 16px; font-weight: bold; color: #1a6b4a; }
+                          </style></head><body>
+                          <h1>Subcontractor Payment Invoice</h1>
+                          <h2>${sub2?.name ?? '—'} · Invoice No: ${selectedInvoice.invoice_no}</h2>
+                          <p>Period End: ${selectedInvoice.period_end} · Status: ${selectedInvoice.status}</p>
+                          <table>
+                            <tr><th>#</th><th>Item Code</th><th>Description</th><th>Unit</th><th>Contract Qty</th><th>Prev. Cum.</th><th>Current Qty</th><th>Cum. Qty</th><th>Rate</th><th>Current Value</th><th>Cum. Value</th><th>%</th></tr>
+                            ${lines.map((b: any, idx: number) => {
+                              const edit = getEdit(b.id)
+                              const contractQty = b.subcontract_qty ?? 0
+                              const prevQty = getPrevQty(b.id)
+                              const currentQty = parseFloat(edit.current_qty) || getEffectiveQty(b)
+                              const cumQty = prevQty + currentQty
+                              const rate = b.rate ?? 0
+                              const pct = contractQty > 0 ? Math.min((cumQty/contractQty)*100,100).toFixed(0) : '0'
+                              const boqItem = b.boq_items as any
+                              return `<tr><td>${idx+1}</td><td>${boqItem?.item_code??b.assignment_key}</td><td>${boqItem?.description??'—'}</td><td>${boqItem?.unit??'—'}</td><td>${contractQty}</td><td>${prevQty.toFixed(3)}</td><td>${currentQty.toFixed(3)}</td><td>${cumQty.toFixed(3)}</td><td>${money(rate)}</td><td>${money(currentQty*rate)}</td><td>${money(cumQty*rate)}</td><td>${pct}%</td></tr>`
+                            }).join('')}
+                            <tr class="total-row"><td colspan="9">TOTAL</td><td>${money(grossTotal)}</td><td>${money(grossTotal)}</td><td></td></tr>
+                          </table>
+                          <div class="summary">
+                            <div class="summary-box"><label>Gross Amount</label><span>${money(grossTotal)}</span></div>
+                            <div class="summary-box"><label>Retention (${selectedInvoice.retention_pct??5}%)</label><span>${money(retentionAmt)}</span></div>
+                            <div class="summary-box"><label>Net Payable</label><span>${money(netAmt)}</span></div>
+                          </div>
+                          </body></html>`
+                        const w = window.open('', '_blank')
+                        if (w) { w.document.write(printContent); w.document.close(); w.print() }
+                      }}>🖨️ Print / Export PDF</Button>
+
+                      <Button tone="secondary" onClick={() => { setInvoiceTab('list'); setSelectedInvoiceId(null) }}>← Back to List</Button>
+                    </div>
+                  </Card>
+                </>
+              })()}
             </>
-          )}
+          })()}
 
           {activeView === 'client-invoices' && (
             <>
