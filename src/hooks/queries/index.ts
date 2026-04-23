@@ -821,3 +821,172 @@ export function usePreviousCumulativeQty(projectId: string | null, subcontractor
     },
   })
 }
+
+// ── Invoice Penalties & Additions ────────────────────────────────
+export function useInvoicePenalties(invoiceId: string | null) {
+  const supabase = createClient()
+  return useQuery({
+    queryKey: ['invoice_penalties', invoiceId],
+    enabled: !!invoiceId,
+    queryFn: async (): Promise<InvoicePenalty[]> => unwrap(
+      await supabase.from('invoice_penalties').select('*').eq('invoice_id', invoiceId!).order('created_at'),
+      []
+    ),
+  })
+}
+
+export function useCreateInvoicePenalty() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: InvoicePenaltyInsert): Promise<InvoicePenalty> =>
+      unwrap(await supabase.from('invoice_penalties').insert(input as any).select().single()),
+    onSuccess: (r) => qc.invalidateQueries({ queryKey: ['invoice_penalties', r.invoice_id] }),
+  })
+}
+
+export function useDeleteInvoicePenalty() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, invoiceId }: { id: string; invoiceId: string }): Promise<void> => {
+      const { error } = await supabase.from('invoice_penalties').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['invoice_penalties', vars.invoiceId] }),
+  })
+}
+
+export function useInvoiceAdditions(invoiceId: string | null) {
+  const supabase = createClient()
+  return useQuery({
+    queryKey: ['invoice_additions', invoiceId],
+    enabled: !!invoiceId,
+    queryFn: async (): Promise<InvoiceAddition[]> => unwrap(
+      await supabase.from('invoice_additions').select('*').eq('invoice_id', invoiceId!).order('created_at'),
+      []
+    ),
+  })
+}
+
+export function useCreateInvoiceAddition() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: InvoiceAdditionInsert): Promise<InvoiceAddition> =>
+      unwrap(await supabase.from('invoice_additions').insert(input as any).select().single()),
+    onSuccess: (r) => qc.invalidateQueries({ queryKey: ['invoice_additions', r.invoice_id] }),
+  })
+}
+
+export function useDeleteInvoiceAddition() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, invoiceId }: { id: string; invoiceId: string }): Promise<void> => {
+      const { error } = await supabase.from('invoice_additions').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['invoice_additions', vars.invoiceId] }),
+  })
+}
+
+// ── Bulk Delete Hooks ─────────────────────────────────────────────
+export function useDeleteSubcontractor() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('subcontractors').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.subcontractors.list(vars.projectId) }),
+  })
+}
+
+export function useDeleteBreakdown() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('subcontract_breakdown').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => {
+      qc.invalidateQueries({ queryKey: qk.breakdown.list(vars.projectId) })
+      qc.invalidateQueries({ queryKey: qk.commercial.summary(vars.projectId) })
+    },
+  })
+}
+
+export function useDeleteBoqItem() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('boq_items').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.boq.list(vars.projectId) }),
+  })
+}
+
+export function useDeleteTechnical() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('technical_records').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.technical.list(vars.projectId) }),
+  })
+}
+
+export function useDeleteProcurement() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('procurement_records').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.procurement.list(vars.projectId) }),
+  })
+}
+
+export function useDeleteVariation() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('variations').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.variations.list(vars.projectId) }),
+  })
+}
+
+export function useDeleteProject() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('projects').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.projects.list() }),
+  })
+}
+
+export function useDeleteQsEntry() {
+  const supabase = createClient()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, projectId }: { id: string; projectId: string }) => {
+      const { error } = await supabase.from('qs_entries').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: qk.qs.list(vars.projectId) }),
+  })
+}

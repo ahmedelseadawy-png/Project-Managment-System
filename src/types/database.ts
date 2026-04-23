@@ -146,3 +146,29 @@ export interface VillaProgress {
 }
 export type VillaProgressInsert = Omit<VillaProgress, 'id' | 'created_at'>
 export type VillaProgressUpdate = Partial<VillaProgressInsert>
+
+export type PenaltyType = 'NCR' | 'Schedule Delay' | 'Warehouse / Material' | 'Other'
+
+export interface InvoicePenalty {
+  id: string
+  invoice_id: string
+  project_id: string
+  subcontractor_id: string
+  penalty_type: PenaltyType
+  reference: string | null
+  description: string
+  amount: number
+  created_at: string
+}
+export type InvoicePenaltyInsert = Omit<InvoicePenalty, 'id' | 'created_at'>
+
+export interface InvoiceAddition {
+  id: string
+  invoice_id: string
+  project_id: string
+  subcontractor_id: string
+  description: string
+  amount: number
+  created_at: string
+}
+export type InvoiceAdditionInsert = Omit<InvoiceAddition, 'id' | 'created_at'>
